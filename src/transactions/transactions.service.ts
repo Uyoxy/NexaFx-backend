@@ -22,53 +22,48 @@ export class TransactionsService {
   ) {}
 
   async createTransaction(createTransactionDto: CreateTransactionDto): Promise<Transaction> {
-    const { userId, currencyId, amount, type, description, sourceAccount, destinationAccount } = createTransactionDto;
-    
-    // Check if reference already exists
-    const existingTransaction = await this.transactionsRepository.findOne({
-      where: { reference: createTransactionDto.reference }
-    });
-
-    if (existingTransaction) {
-      throw new ConflictException(`Transaction with reference ${createTransactionDto.reference} already exists`);
+    const { userId, currencyId, amount, type, description, sourceAccount, destinationAccount, reference } = createTransactionDto;
+  
+    if (reference) {
+      const existingTransaction = await this.transactionsRepository.findOne({
+        where: { reference },
+      });
+  
+      if (existingTransaction) {
+        throw new ConflictException(`Transaction with reference ${reference} already exists`);
+      }
     }
-
-    // Set default status if not provided
-    if (!createTransactionDto.status) {
-      createTransactionDto.status = TransactionStatus.PENDING;
-    }
-
-    // Fetch currency to get feePercentage
+  
     const currency = await this.currencyRepository.findOne({
       where: { id: currencyId },
     });
-
+  
     if (!currency) {
-      throw new Error('Currency not found.');
+      throw new NotFoundException('Currency not found.');
     }
-
+  
     const feePercentage = currency.feePercentage ?? 0;
-
-    // Calculate fee and total
+  
     const feeAmount = Number((amount * feePercentage).toFixed(2));
+    const commissionAmount = feeAmount;
     const totalAmount = Number((amount + feeAmount).toFixed(2));
-
-    // Log for auditing
+  
     this.logger.log(`Transaction Fee Breakdown:
       User ID: ${userId}
       Base Amount: ${amount}
       Fee Percentage: ${feePercentage * 100}%
       Fee Amount: ${feeAmount}
+      Commission Amount: ${commissionAmount}
       Total Amount (Amount + Fee): ${totalAmount}
     `);
-
+  
     const transaction = this.transactionsRepository.create({
       userId,
       type,
-      amount: totalAmount, // Save total amount as the main amount
+      amount: totalAmount,
       currencyId,
-      status: TransactionStatus.PENDING,
-      reference: this.generateReference(), // Assume you have a reference generator
+      status: createTransactionDto.status ?? TransactionStatus.PENDING,
+      reference: reference ?? this.generateReference(),
       description,
       sourceAccount,
       destinationAccount,
@@ -78,12 +73,15 @@ export class TransactionsService {
         baseAmount: amount,
         feePercentage,
         feeAmount,
+        commissionAmount,
         totalAmount,
       },
     });
-
+  
     return await this.transactionsRepository.save(transaction);
   }
+  
+
 
   private generateReference(): string {
     return 'TXN-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8).toUpperCase();
